@@ -1,5 +1,6 @@
 
 -- "is_short_form"logic: where la.provider_name!='CreditFresh Internal' and la.provider_name not like '%test%' and la.`IsApplicationTest`=0 and la.`campaign_name`  like '%-SF'
+-- test for github version
 
 
 ##LOC NL - New Originations : effective_date = today
