@@ -14,7 +14,7 @@ Update steps:
 4.	All the historical data will be stored at Git-hub for future tracking purpose
 
 
-Add new query
+Add query
 1.	Simply drag the query to the Git-hub target file.
 2.	Make sure you label the file correctly
 3.	Commit the changes made locally and push to origin
