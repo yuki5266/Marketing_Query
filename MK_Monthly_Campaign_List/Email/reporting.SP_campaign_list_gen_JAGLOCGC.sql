@@ -1,5 +1,27 @@
-
-	
+DROP PROCEDURE IF EXISTS reporting.SP_campaign_list_gen_JAGLOCGC;
+CREATE PROCEDURE reporting.`SP_campaign_list_gen_JAGLOCGC`()
+BEGIN
+/*********************************************************************************************************************************
+---    NAME : SP_campaign_list_gen_JAGLOCGC
+---    DESCRIPTION: script for monthly_campaign_history data population
+	/*
+	JAG LOC GC condition
+	Active: 
+	For state in ('KS', 'TN', 'SC')
+	1. loan_status ='Originated'
+	2.days_since_last_draw>=15 
+	3.(>=40%available_credit_limit) or (<40% but >=$100)
+	4.<=2 defaults 
+	5. excluding cf.optout_marketing_email='true'
+	Inactive: No inactive customer will be in the list 
+  
+---    DD/MM/YYYY    Ticket#        Comment
+---    15/10/2019    DAT-1037 			initial version 
+---    18/12/2019    DAT-1264				modify SP based on new logic from Yuki
+************************************************************************************************************************************/
+	DECLARE IsHoliday INT DEFAULT 0;
+	DECLARE NotRunFlag INT DEFAULT 0;
+  SET SQL_SAFE_UPDATES=0;
   SET @start = 'Start', @end = 'End', @success = ' succeeded,', @failed = ' failed, returned SQL_STATE = ', @error_msg = ', error message = ', @total_rows = ' total row count = '; 
   SET @process_name = 'SP_campaign_list_gen_JAGLOCGC', @status_flag_success = 1, @status_flag_failure = 0;
   SET @valuation_date = curdate();  
@@ -8,6 +30,36 @@
   -- SET @intervaldays = 30;  SET @std_date= @std_date=(select subdate(curdate(),@intervaldays)),
   SET @std_date= '2018-01-01', @end_date= curdate();
 
+ /* SELECT count(*) INTO IsHoliday
+		FROM reporting.vw_DDR_ach_date_matching ddr
+		 LEFT JOIN jaglms.business_holidays bh ON ori_date = bh.holiday
+		WHERE ori_date = curdate()
+			AND (ddr.weekend = 1 OR bh.description LIKE 'Thanksgiving%');
+	IF (@MonthNumber = 1 AND @DayNumber = 1) OR (@MonthNumber = 12 AND @DayNumber = 25) THEN -- skip the job on Dec 25 and Jan 1
+    SET NotRunFlag = 1;
+	ELSEIF IsHoliday = 1 THEN  -- skip the job on weekend and US Thanksgiving Day
+		SET NotRunFlag = 1;
+	ELSE 
+    SET NotRunFlag = 0;
+  END IF;
+
+	IF NotRunFlag = 0 THEN */
+		-- log the start info
+		CALL reporting.SP_process_log(@valuation_date, @process_name, @start, null, 'job is running', null);
+
+	-- prepare temporary tables 
+		BEGIN
+			DECLARE sql_code CHAR(5) DEFAULT '00000';
+			DECLARE sql_msg TEXT;
+			DECLARE rowCount INT;
+			DECLARE return_message TEXT;
+
+			DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+			BEGIN
+				GET DIAGNOSTICS CONDITION 1
+					sql_code = RETURNED_SQLSTATE, sql_msg = MESSAGE_TEXT;
+			END;
+			SET @process_label ='Prepare data in temporary tables', @process_type = 'Insert';	
 
 			DROP TEMPORARY TABLE IF EXISTS all_customer;
 			CREATE TEMPORARY TABLE IF NOT EXISTS all_customer ( INDEX(origination_loan_id) ) 
@@ -97,6 +149,28 @@
 			left join exc1 e1 on f.lms_customer_id=e1.lms_customer_id
 			where e1.lms_customer_id is null);
 
+		IF sql_code = '00000' THEN
+				GET DIAGNOSTICS rowCount = ROW_COUNT;
+				SET return_message = CONCAT(@process_type, @success, @total_rows,rowCount);
+				CALL reporting.SP_process_log(@valuation_date, @process_name, @process_label, @process_type, return_message, @status_flag_success);
+			ELSE
+				SET return_message = CONCAT(@process_type, @failed, sql_code, @error_msg ,sql_msg);
+				CALL reporting.SP_process_log(@valuation_date, @process_name, @process_label, @process_type, return_message, @status_flag_failure);
+			END IF;
+		END;	
+
+   -- populate data into target table
+		BEGIN
+			DECLARE sql_code CHAR(5) DEFAULT '00000';
+			DECLARE sql_msg TEXT;
+			DECLARE rowCount INT;
+			DECLARE return_message TEXT;
+
+			DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+			BEGIN
+				GET DIAGNOSTICS CONDITION 1
+					sql_code = RETURNED_SQLSTATE, sql_msg = MESSAGE_TEXT;
+			END;
 			SET @process_label ='add data into target table', @process_type = 'Insert';	
 			INSERT INTO reporting.loc_gc_campaign_history
 			(list_generation_date, list_module, job_ID, lms_customer_id, lms_application_id,origination_loan_id, first_name,email, state, pay_frequency,
@@ -111,10 +185,22 @@
 			lms_customer_id, lms_application_id,origination_loan_id, firstname, email, state, pay_frequency,
 			approved_amount,total_draw_count, total_draw_amount, origination_date, last_payment_date,
 			original_credit_limit,available_credit_limit, loan_status, Days_since_last_payment, avail_credit_rate,
-			Available_credit_range, days_since_last_draw, total_default_count, total_payment_count
+			Available_credit_range, days_since_last_draw, total_default_count, total_payment_count      
 			from all_list
 			-- where days_since_last_draw>=15 and (avail_credit_rate>=0.4 or available_credit_limit>=100) and total_default_count<3;
-    where case when state!='SC' then days_since_last_draw>=15 and (avail_credit_rate>=0.4 or available_credit_limit>=100) and total_default_count<3
-         when state='SC' then days_since_last_draw>=15 and available_credit_limit>=610 and total_default_count<3
-         end ;
-select * from shared.credit_limit_lookup;
+			where (case when state!='SC' then days_since_last_draw>=15 and (avail_credit_rate>=0.4 or available_credit_limit>=100) and total_default_count<3
+									when state='SC' then days_since_last_draw>=15 and available_credit_limit>=610 and total_default_count<3
+						 end);  -- DAT-1264
+			-- select * from reporting.loc_gc_campaign_history where list_generation_date>=curdate() and list_module='JAGLOCGC';
+			IF sql_code = '00000' THEN
+				GET DIAGNOSTICS rowCount = ROW_COUNT;
+				SET return_message = CONCAT(@process_type, @success, @total_rows,rowCount);
+				CALL reporting.SP_process_log(@valuation_date, @process_name, @process_label, @process_type, return_message, @status_flag_success);
+			ELSE
+				SET return_message = CONCAT(@process_type, @failed, sql_code, @error_msg ,sql_msg);
+				CALL reporting.SP_process_log(@valuation_date, @process_name, @process_label, @process_type, return_message, @status_flag_failure);
+			END IF;
+		END;	
+		CALL reporting.SP_process_log(@valuation_date, @process_name, @end, null, 'job is done', @status_flag_success);
+  -- END IF;
+END;
