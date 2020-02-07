@@ -2,7 +2,7 @@
 
 ![alt](https://media.giphy.com/media/tIeCLkB8geYtW/giphy.gif)
 
-Step: 
+Steps: 
 1.	Create the depository in Git-hub : Marketing_Query
 2.	Use Git-hub Desktop to create the folder in the shared drive: Z:\Marketing\Analytics_Shared\Github Code
 3.	Upload the query by copying the query to the target folder
